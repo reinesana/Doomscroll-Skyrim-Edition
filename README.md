@@ -34,7 +34,7 @@
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/reinesana/doomscroll-skyrim-edition.git
+git clone https://github.com/reinesana/Doomscroll-Skyrim-Edition.git
 ```
 
 ### 2. Install dependencies
