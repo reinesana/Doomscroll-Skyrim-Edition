@@ -13,3 +13,5 @@ env/
 *.log
 *.tmp
 .ipynb_checkpoints/
+
+*.task

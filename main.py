@@ -1,8 +1,13 @@
-import cv2  
-import mediapipe as mp  
+import cv2
+import mediapipe as mp
 import time
 import subprocess
 from pathlib import Path
+
+BaseOptions = mp.tasks.BaseOptions
+FaceLandmarker = mp.tasks.vision.FaceLandmarker
+FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
+VisionRunningMode = mp.tasks.vision.RunningMode
 
 
 def osascript(script: str) -> None:
@@ -19,7 +24,7 @@ def play_video(video_path: Path) -> None:
     tell application "QuickTime Player"
         activate
         set doc to open POSIX file "{absolute_path}"
-        
+
         tell doc
             play
             set presenting to false
@@ -75,111 +80,101 @@ def draw_warning(frame, text="lock in twin"):
     )
 
 
-    
+
 def main():
     timer = 2.0
-    looking_down_threshold = 0.25
-    debounce_threshold = 0.45
-    
+    start_threshold = 0.4
+    maintain_threshold = 0.3
+
     skyrim_skeleton_video = Path("./assets/skyrim-skeleton.mp4").resolve()
     if not skyrim_skeleton_video.exists():
         print("Could not open skyrim-skeleton.mp4")
         return
-    
-    face_mesh_landmarks = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
+
+    model_path = Path("./assets/face_landmarker.task").resolve()
+    if not model_path.exists():
+        print("Missing model. Run: curl -o assets/face_landmarker.task https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task")
+        return
+
+    options = FaceLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=str(model_path)),
+        running_mode=VisionRunningMode.VIDEO,
+        output_face_blendshapes=True,
+        num_faces=1)
 
     cam = cv2.VideoCapture(0)
     if not cam.isOpened():
         print("Could not open webcam")
         return
-    
+
+    fps = cam.get(cv2.CAP_PROP_FPS) or 30
+    frame_timestamp_ms = 0
+
     doomscroll = None
     video_playing = False
+    not_looking_count = 0
+    reset_threshold = 10
 
-    while True:
-        ret, frame = cam.read()
-        if not ret:
-            continue
-        
-        frame = cv2.flip(frame, 1)
-        height, width, depth = frame.shape
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        processed_image = face_mesh_landmarks.process(rgb_frame)
-        face_landmark_points = processed_image.multi_face_landmarks
+    with FaceLandmarker.create_from_options(options) as landmarker:
+        while True:
+            ret, frame = cam.read()
+            if not ret:
+                continue
 
-        current = time.time()
+            frame = cv2.flip(frame, 1)
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+            result = landmarker.detect_for_video(mp_image, int(frame_timestamp_ms))
+            frame_timestamp_ms += 1000 / fps
+            face_landmark_points = result.face_landmarks
 
-        if face_landmark_points:
-            one_face_landmark_points = face_landmark_points[0].landmark
-            
-            left = [one_face_landmark_points[145], one_face_landmark_points[159]]
-            for landmark_point in left:
-                x = int(landmark_point.x * width)
-                y = int(landmark_point.y * height)
+            current = time.time()
 
-            right = [one_face_landmark_points[374], one_face_landmark_points[386]]
-            for landmark_point in right:
-                    x = int(landmark_point.x * width)
-                    y = int(landmark_point.y * height)
-                 
-            
-            lx = int((left[0].x + left[1].x) / 2 * width)
-            ly = int((left[0].y + left[1].y) / 2 * height)
+            blendshapes = result.face_blendshapes
 
-            rx = int((right[0].x + right[1].x) / 2 * width)
-            ry = int((right[0].y + right[1].y) / 2 * height)
+            if blendshapes and len(blendshapes[0]) > 12:
+                bs = blendshapes[0]
+                look_down_score = (bs[11].score + bs[12].score) / 2.0
 
-            box = 50
+                threshold = maintain_threshold if video_playing else start_threshold
+                is_looking_down = look_down_score > threshold
 
-            cv2.rectangle(frame, (lx - box, ly - box), (lx + box, ly + box), (10, 255, 0), 2)
-            cv2.rectangle(frame, (rx - box, ry - box), (rx + box, ry + box), (10, 255, 0), 2)
-            
+                if is_looking_down:
+                    not_looking_count = 0
+                    if doomscroll is None:
+                        doomscroll = current
 
-            l_iris = one_face_landmark_points[468]
-            r_iris = one_face_landmark_points[473]
-            
-            l_ratio = (l_iris.y  - left[1].y)  / (left[0].y  - left[1].y  + 1e-6)
-            r_ratio = (r_iris.y - right[1].y) / (right[0].y - right[1].y + 1e-6)
+                    if (current - doomscroll) >= timer:
+                        if not video_playing:
+                            play_video(skyrim_skeleton_video)
+                            video_playing = True
 
-            avg_ratio = (l_ratio + r_ratio) / 2.0
+                else:
+                    not_looking_count += 1
+                    if not_looking_count >= reset_threshold:
+                        doomscroll = None
+                        if video_playing:
+                            close_video(skyrim_skeleton_video)
+                            video_playing = False
+            else:
+                not_looking_count += 1
+                if not_looking_count >= reset_threshold:
+                    doomscroll = None
+                    if video_playing:
+                        close_video(skyrim_skeleton_video)
+                        video_playing = False
 
             if video_playing:
-                is_looking_down = avg_ratio < debounce_threshold
-            else:
-                is_looking_down = avg_ratio < looking_down_threshold
+                draw_warning(frame, "doomscrolling alarm")
 
+            cv2.imshow('lock in', frame)
+            key = cv2.waitKey(1)
 
-            if is_looking_down:
-                if doomscroll is None:
-                    doomscroll = current
-
-                if (current - doomscroll) >= timer:               
-                    if not video_playing:
-                        play_video(skyrim_skeleton_video)
-                        video_playing = True
-
-            else:
-                doomscroll = None
-                if video_playing:
-                    close_video(skyrim_skeleton_video)
-                    video_playing = False
-        else:
-            doomscroll = None
-            if video_playing:
-                close_video(skyrim_skeleton_video)
-                video_playing = False
+            if key == 27:
+                break
 
         if video_playing:
-            draw_warning(frame, "doomscrolling alarm")
-
-        cv2.imshow('lock in', frame)
-        key = cv2.waitKey(1)
-
-        if key == 27:
-            break
-
-    if video_playing:
-        close_video(skyrim_skeleton_video)
+            close_video(skyrim_skeleton_video)
 
     cam.release()
     cv2.destroyAllWindows()
@@ -187,6 +182,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-

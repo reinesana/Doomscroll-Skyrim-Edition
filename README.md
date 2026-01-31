@@ -8,24 +8,24 @@
 
 ## Introduction
 
-**Doomscrolling: Skyrim Edition** is a CV productivity tool inspired by the **Skeleton** trend on **TikTok** and my previous doomscrolling tool: **Charlie Kirkification**. Designed for laptop-based work only. Using your webcam, the program tracks your eye and iris movement in real time to detect when you’re looking down at your phone (aka doomscrolling).
+**Doomscrolling: Skyrim Edition** is a CV productivity tool inspired by the **Skeleton** trend on **TikTok** and my previous doomscrolling tool: **Charlie Kirkification**. Designed for laptop-based work only. Using your webcam, the program tracks your eye gaze in real time to detect when you're looking down at your phone (aka doomscrolling).
 
-**Note**: this tool does not work for activities like writing, reading books, or other offline tasks since it uses iris movement to detect doomscrolling
+**Note**: this tool does not work for activities like writing, reading books, or other offline tasks since it uses gaze detection to detect doomscrolling
 
 ---
 
 ## How it works
 
-1. Your webcam feed is processed in real time using face mesh + iris tracking  
-2. The program checks whether your iris movement suggests you’re looking at your phone
+1. Your webcam feed is processed in real time using MediaPipe's face landmarker
+2. The program uses eye gaze blendshapes to detect when you're looking down
 3. If you doomscroll for longer than a set threshold:
-   -  The Skyrim Skeleton interferes with your doomscrolling
+   - The Skyrim Skeleton interferes with your doomscrolling
 
 ---
 
-## Sytem Requirements
-- Operating System: macOS using `osascript`,  `QuickTime Player`
-- Python: 3.9 - 3.12. Not compatible with Python 3.13
+## System Requirements
+- Operating System: macOS using `osascript`, `QuickTime Player`
+- Python: 3.9+
 - Permissions: Camera access must be enabled for the terminal running the script.
 
 ---
@@ -37,14 +37,23 @@
 git clone https://github.com/reinesana/Doomscroll-Skyrim-Edition.git
 ```
 
-### 2. Install dependencies
-Make sure you are using **Python 3.9-3.12+** on your system. Not compatible with Python 3.13.
+### 2. Create a virtual environment (recommended)
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
 
+### 3. Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Run the program
+### 4. Download the face landmarker model
+```bash
+curl -o assets/face_landmarker.task https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+```
+
+### 5. Run the program
 ```bash
 python main.py
 ```
@@ -64,25 +73,19 @@ The minimum amount of time the user must be “looking down” before triggering
 timer = 2.0  
 ```
 
-### `looking_down_threshold`
-The minimum iris position required to consider the user as looking down.
-Lower value → more strict and requires stronger downward gaze
-Higher value → more sensitive 
-  
-Adjust `looking_down_threshold` to control the sensitivity of iris detection.
-```python
-looking_down_threshold = 0.25
+### `start_threshold`
+The gaze score required to start the video.
+- Higher value → more strict, requires stronger downward gaze to trigger
 
+```python
+start_threshold = 0.4
 ```
 
-### `debounce_threshold`
-The minimum threshold required for the system to exit the “looking down” state before the program resets.
-- Lower value → video stops more easily (more strict while playing)
-- Higher value → video stays on longer (more forgiving while playing)
+### `maintain_threshold`
+The threshold used while the video is playing. Lower than `start_threshold` so the video keeps playing unless you clearly look up.
 
-Adjust `debounce_threshold` to control how much upward eye movement is required before the program resets.
 ```python
-debounce_threshold = 0.45
+maintain_threshold = 0.3
 ```
 
 ---
